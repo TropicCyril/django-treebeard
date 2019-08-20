@@ -130,8 +130,17 @@ class MoveNodeForm(forms.ModelForm):
 
         return position_type, reference_node_id
 
+    def _reference_model(self):
+        bases = (
+            m for m in self._meta.model.mro()
+            if any(b in (MP_Node, NS_Node, AL_Node)
+                   for b in m.__bases__)
+        )
+        return next(bases)
+    
     def save(self, commit=True):
         position_type, reference_node_id = self._clean_cleaned_data()
+        reference_model = self._reference_model()
 
         if self.instance.pk is None:
             cl_data = {}
@@ -139,16 +148,17 @@ class MoveNodeForm(forms.ModelForm):
                 if not isinstance(self.cleaned_data[field], (list, QuerySet)):
                     cl_data[field] = self.cleaned_data[field]
             if reference_node_id:
-                reference_node = self._meta.model.objects.get(
+                reference_node = reference_model.objects.get(
                     pk=reference_node_id)
-                self.instance = reference_node.add_child(**cl_data)
-                self.instance.move(reference_node, pos=position_type)
+                self.instance = self._meta.model(**cl_data)
+                self.instance = reference_node.add_child(instance=self.instance)
             else:
-                self.instance = self._meta.model.add_root(**cl_data)
+                self.instance = self._meta.model(**cl_data)
+                self.instance = reference_model.add_root(instance=self.instance)
         else:
             self.instance.save()
             if reference_node_id:
-                reference_node = self._meta.model.objects.get(
+                reference_node = reference_model.objects.get(
                     pk=reference_node_id)
                 self.instance.move(reference_node, pos=position_type)
             else:
@@ -156,9 +166,9 @@ class MoveNodeForm(forms.ModelForm):
                     pos = 'sorted-sibling'
                 else:
                     pos = 'first-sibling'
-                self.instance.move(self._meta.model.get_first_root_node(), pos)
+                self.instance.move(reference_model.get_first_root_node(), pos)
         # Reload the instance
-        self.instance = self._meta.model.objects.get(pk=self.instance.pk)
+        self.instance = reference_model.objects.get(pk=self.instance.pk)
         super(MoveNodeForm, self).save(commit=commit)
         return self.instance
 
